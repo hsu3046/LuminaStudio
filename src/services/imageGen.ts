@@ -1,9 +1,23 @@
 // Image Generation Service
 // Ported from lumina-imagegen/app/api/generate/route.ts
-// Uses Tauri HTTP plugin to bypass browser CORS restrictions
+// Uses Tauri HTTP plugin (desktop) or browser fetch (web) for API calls
 
 import { getApiKey, type Provider, type Quality } from './settings';
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { isTauri } from '../utils/platform';
+
+// Environment-aware fetch: Tauri HTTP plugin in desktop, native fetch in browser
+async function apiFetch(url: string, init: RequestInit): Promise<Response> {
+    if (isTauri()) {
+        const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+        return tauriFetch(url, init as any);
+    }
+    return fetch(url, init);
+}
+
+// SeedDream endpoint: direct API in Tauri, proxy in browser (CORS bypass)
+const SEEDREAM_URL = isTauri()
+    ? 'https://ark.ap-southeast.bytepluses.com/api/v3/images/generations'
+    : '/api/generate-proxy';
 
 export interface GenerateOptions {
     provider: Provider;
@@ -146,7 +160,7 @@ async function handleGemini(
             : prompt;
         requestParts.push({ text: promptText });
 
-        const response = await tauriFetch(url, {
+        const response = await apiFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -245,14 +259,14 @@ async function handleOpenAI(
         formData.append('size', size);
         formData.append('quality', openaiQuality);
 
-        response = await tauriFetch('https://api.openai.com/v1/images/edits', {
+        response = await apiFetch('https://api.openai.com/v1/images/edits', {
             method: 'POST',
             headers: { Authorization: `Bearer ${apiKey}` },
             body: formData,
         });
     } else {
         // Text only → /v1/images/generations (JSON)
-        response = await tauriFetch('https://api.openai.com/v1/images/generations', {
+        response = await apiFetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -377,7 +391,7 @@ async function handleSeedream(
     console.log(`[SeedDream] Request body size: ${(jsonBody.length / 1024).toFixed(1)}KB`);
 
     try {
-        const response = await tauriFetch('https://ark.ap-southeast.bytepluses.com/api/v3/images/generations', {
+        const response = await apiFetch(SEEDREAM_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

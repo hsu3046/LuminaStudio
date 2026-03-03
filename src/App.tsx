@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { isTauri } from "./utils/platform";
 import {
   Folder, FolderOpen, Image, Monitor, Download, ChevronRight,
   ArrowUp, Grid2x2, Grid3x3, List, X, ChevronLeft, ChevronRight as ChevronRightNav,
@@ -62,11 +61,13 @@ const THUMB_MAX = 3;
 const thumbWait: Array<() => void> = [];
 
 async function loadThumbnail(path: string, size: number): Promise<string | null> {
+  if (!isTauri()) return null;
   if (thumbActive >= THUMB_MAX) {
     await new Promise<void>((resolve) => thumbWait.push(resolve));
   }
   thumbActive++;
   try {
+    const { invoke } = await import("@tauri-apps/api/core");
     const r = await invoke<ThumbnailResult>("get_thumbnail", { path, size });
     return `data:image/jpeg;base64,${r.data}`;
   } catch {
@@ -149,12 +150,15 @@ function Lightbox({
   useEffect(() => {
     setLoading(true);
     setImageData(null);
-    invoke<string>("get_image_base64", { path: current.path })
-      .then((data) => {
-        setImageData(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    if (!isTauri()) return;
+    import("@tauri-apps/api/core").then(({ invoke }) => {
+      invoke<string>("get_image_base64", { path: current.path })
+        .then((data) => {
+          setImageData(data);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    });
   }, [current.path]);
 
   useEffect(() => {
@@ -227,7 +231,8 @@ const PAGE_SIZE = 30;
 type AppPage = 'gallery' | 'generate' | 'settings';
 
 export default function App() {
-  const [page, setPage] = useState<AppPage>('gallery');
+  const isDesktop = isTauri();
+  const [page, setPage] = useState<AppPage>(isDesktop ? 'gallery' : 'generate');
   const [currentPath, setCurrentPath] = useState("");
   const [allFiles, setAllFiles] = useState<FileEntry[]>([]);
   const [imageCount, setImageCount] = useState(0);
@@ -251,7 +256,7 @@ export default function App() {
     setAllFiles([]);
     setDisplayCount(PAGE_SIZE);
     try {
-      const result = await invoke<DirectoryListing>("scan_directory", {
+      const result = await (await import("@tauri-apps/api/core")).invoke<DirectoryListing>("scan_directory", {
         path,
       });
       setAllFiles(result.files);
@@ -272,15 +277,20 @@ export default function App() {
 
   // Initial load
   useEffect(() => {
-    invoke<string>("get_pictures_directory")
-      .then((path) => navigateTo(path))
-      .catch(() =>
-        invoke<string>("get_home_directory").then((path) => navigateTo(path))
-      );
-  }, [navigateTo]);
+    if (!isDesktop) return;
+    import("@tauri-apps/api/core").then(({ invoke }) => {
+      invoke<string>("get_pictures_directory")
+        .then((path) => navigateTo(path))
+        .catch(() =>
+          invoke<string>("get_home_directory").then((path) => navigateTo(path))
+        );
+    });
+  }, [navigateTo, isDesktop]);
 
   // Open folder dialog
   const handleOpenFolder = useCallback(async () => {
+    if (!isDesktop) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({
       directory: true,
       multiple: false,
@@ -318,7 +328,10 @@ export default function App() {
     const paths = Array.from(selectedPaths);
     try {
       const base64Results = await Promise.all(
-        paths.map(p => invoke<string>('get_image_base64', { path: p }))
+        paths.map(async (p) => {
+          const { invoke } = await import("@tauri-apps/api/core");
+          return invoke<string>('get_image_base64', { path: p });
+        })
       );
       setPendingRefs(base64Results);
       setSelectMode(false);
@@ -369,7 +382,7 @@ export default function App() {
           {/* App tabs */}
           <div className="sidebar-section">
             <div className="sidebar-section-title">App</div>
-            <button className={`sidebar-item ${page === 'gallery' ? 'active' : ''}`} onClick={() => setPage('gallery')}>
+            <button className={`sidebar-item ${page === 'gallery' ? 'active' : ''}`} onClick={() => setPage('gallery')} style={isDesktop ? {} : { display: 'none' }}>
               <span className="icon"><Image size={16} strokeWidth={1.5} /></span>
               <span className="label">Gallery</span>
             </button>
@@ -384,19 +397,19 @@ export default function App() {
           </div>
 
           {/* Gallery-specific sections (only when on gallery page) */}
-          {page === 'gallery' && (
+          {page === 'gallery' && isDesktop && (
             <>
               <div className="sidebar-section">
                 <div className="sidebar-section-title">Quick Access</div>
-                <button className="sidebar-item" onClick={() => invoke<string>("get_pictures_directory").then(navigateTo)}>
+                <button className="sidebar-item" onClick={async () => { const { invoke } = await import("@tauri-apps/api/core"); invoke<string>("get_pictures_directory").then(navigateTo); }}>
                   <span className="icon"><Image size={16} strokeWidth={1.5} /></span>
                   <span className="label">Pictures</span>
                 </button>
-                <button className="sidebar-item" onClick={() => invoke<string>("get_home_directory").then((p) => navigateTo(p + "/Desktop"))}>
+                <button className="sidebar-item" onClick={async () => { const { invoke } = await import("@tauri-apps/api/core"); invoke<string>("get_home_directory").then((p) => navigateTo(p + "/Desktop")); }}>
                   <span className="icon"><Monitor size={16} strokeWidth={1.5} /></span>
                   <span className="label">Desktop</span>
                 </button>
-                <button className="sidebar-item" onClick={() => invoke<string>("get_home_directory").then((p) => navigateTo(p + "/Downloads"))}>
+                <button className="sidebar-item" onClick={async () => { const { invoke } = await import("@tauri-apps/api/core"); invoke<string>("get_home_directory").then((p) => navigateTo(p + "/Downloads")); }}>
                   <span className="icon"><Download size={16} strokeWidth={1.5} /></span>
                   <span className="label">Downloads</span>
                 </button>
@@ -420,15 +433,17 @@ export default function App() {
             </>
           )}
         </div>
-        {page === 'gallery' && (
-          <button className="open-folder-btn" onClick={handleOpenFolder}>
-            <FolderPlus size={14} strokeWidth={1.5} /> 폴더 열기
-          </button>
-        )}
-      </aside>
+        {
+          page === 'gallery' && isDesktop && (
+            <button className="open-folder-btn" onClick={handleOpenFolder}>
+              <FolderPlus size={14} strokeWidth={1.5} /> 폴더 열기
+            </button>
+          )
+        }
+      </aside >
 
       {/* ─── Main ─── */}
-      <div className="main-content">
+      < div className="main-content" >
         {page === 'gallery' && (
           <>
             {/* Toolbar */}
@@ -588,21 +603,24 @@ export default function App() {
               </div>
             )}
           </>
-        )}
+        )
+        }
 
         {page === 'generate' && <Generate initialRefs={pendingRefs} onRefsConsumed={() => setPendingRefs([])} />}
         {page === 'settings' && <SettingsPage />}
-      </div>
+      </div >
 
       {/* Lightbox */}
-      {lightboxIndex !== null && imageFiles.length > 0 && (
-        <Lightbox
-          images={imageFiles}
-          currentIndex={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
-          onNavigate={setLightboxIndex}
-        />
-      )}
-    </div>
+      {
+        lightboxIndex !== null && imageFiles.length > 0 && (
+          <Lightbox
+            images={imageFiles}
+            currentIndex={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+            onNavigate={setLightboxIndex}
+          />
+        )
+      }
+    </div >
   );
 }

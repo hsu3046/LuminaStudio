@@ -60,6 +60,7 @@ export default function Settings() {
                                     onChange={e => updateKey(p.id, e.target.value)}
                                     placeholder={p.placeholder}
                                     spellCheck={false}
+                                    autoComplete="off"
                                 />
                                 <button className="settings-key-toggle" onClick={() => toggleShow(p.id)}>
                                     {showKeys[p.id] ? <EyeOff size={14} /> : <Eye size={14} />}
