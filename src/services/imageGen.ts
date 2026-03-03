@@ -64,15 +64,31 @@ export function estimateCost(
 ): { cost: number; detail: string } {
     switch (provider) {
         case 'gemini': {
-            // Gemini: 0.0315 $/image (output), input ~$0.001 per ref
+            // Gemini 3.1 Flash Image Preview (2026 pricing)
+            // Text input: $0.50/1M tokens → negligible (~$0.00005 per prompt)
+            // Image input: 560 tokens → ~$0.001 per reference image
+            // Output by resolution:
+            //   512px: 747 tokens → $0.045
+            //   1K:   1120 tokens → $0.067
+            //   2K:   1680 tokens → $0.101
+            //   4K:   2520 tokens → $0.151
             const inputCost = refCount * 0.001;
-            const outputCost = 0.0315;
-            return { cost: inputCost + outputCost, detail: `Gemini ~$${(inputCost + outputCost).toFixed(3)}` };
+            const outputPrices: Record<Quality, number> = {
+                standard: 0.067,  // ~1K
+                '2k': 0.101,      // ~2K
+                '4k': 0.151,      // ~4K
+            };
+            const outputCost = outputPrices[quality];
+            const total = inputCost + outputCost;
+            return { cost: total, detail: `Gemini ~$${total.toFixed(3)}` };
         }
         case 'openai': {
-            // OpenAI GPT Image 1: quality × size
-            // 1024x1024: low $0.011, med $0.042, high $0.167
-            // 1536x1024/1024x1536: low $0.016, med $0.063, high $0.25
+            // OpenAI gpt-image-1 (2026 pricing)
+            // Text input: $5.00/1M tokens → negligible (~$0.0005 per prompt)
+            // Image input: $10.00/1M tokens → ~$0.003 per ref (avg ~300 tokens)
+            // Output by quality × size:
+            //   1024x1024:  low $0.011, medium $0.042, high $0.167
+            //   1536x1024:  low $0.016, medium $0.063, high $0.250
             type OaiQuality = 'low' | 'medium' | 'high';
             const [rw, rh] = aspectRatio.split(':').map(Number);
             const isSquare = rw && rh ? Math.abs(rw / rh - 1) < 0.05 : true;
@@ -81,13 +97,17 @@ export function estimateCost(
                 square: { low: 0.011, medium: 0.042, high: 0.167 },
                 rect: { low: 0.016, medium: 0.063, high: 0.25 },
             };
-            const cost = prices[isSquare ? 'square' : 'rect'][oaiQ];
-            return { cost, detail: `OpenAI ~$${cost.toFixed(3)}` };
+            const imgCost = prices[isSquare ? 'square' : 'rect'][oaiQ];
+            const refCost = refCount * 0.003;
+            const total = imgCost + refCost;
+            return { cost: total, detail: `OpenAI ~$${total.toFixed(3)}` };
         }
         case 'seedream': {
-            // SeedDream: standard ~$0.02, 2k ~$0.04, 4k ~$0.08
-            const costs: Record<Quality, number> = { standard: 0.02, '2k': 0.04, '4k': 0.08 };
-            const cost = costs[quality];
+            // SeedDream 4.5 (2026 pricing)
+            // Flat rate per image, resolution independent
+            // Official: ~$0.04/image (Seedream 4.5)
+            // Reference images: included in per-image cost (no additional charge)
+            const cost = 0.04;
             return { cost, detail: `SeedDream ~$${cost.toFixed(3)}` };
         }
     }
