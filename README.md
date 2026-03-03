@@ -7,15 +7,15 @@
 
 ---
 
-## Summary (EN)
+## Summary-en
 
 Lumina Studio is a free macOS app that lets you browse your photo library and create new images with AI — all in one place. Pick any photos from your folders, use them as inspiration, and generate stunning new images with a single click. Supports Google Gemini, OpenAI, and SeedDream (API key required for AI generation).
 
-## 개요 (KO)
+## Summary-ko
 
 Lumina Studio는 macOS용 무료 앱으로, 내 컴퓨터의 사진을 갤러리로 감상하고 AI로 새로운 이미지를 만들 수 있습니다. 마음에 드는 사진을 골라 영감의 소스로 활용하면, 클릭 한 번으로 멋진 이미지가 생성됩니다. Google Gemini, OpenAI, SeedDream을 지원합니다 (AI 이미지 생성에는 각 서비스의 API 키 발급이 필요합니다).
 
-## 概要 (JA)
+## Summary-ja
 
 Lumina Studioは、macOS用の無料アプリです。パソコン内の写真をギャラリーとして閲覧し、AIで新しい画像を作成できます。お気に入りの写真をインスピレーションとして選び、ワンクリックで素敵な画像を生成。Google Gemini、OpenAI、SeedDreamに対応しています（AI画像生成には各サービスのAPIキーの取得が必要です）。
 
