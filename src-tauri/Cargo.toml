@@ -1,0 +1,34 @@
+[package]
+name = "lumina-studio"
+version = "0.1.0"
+description = "Native Image Viewer & AI Editor"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "lumina_studio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = "0.25"
+walkdir = "2"
+mime_guess = "2"
+base64 = "0.22"
+md5 = "0.7"
+dirs = "6"
+tokio = { version = "1", features = ["full"] }
+
+# Optimize image processing even in dev mode.
+# Without this, Lanczos3 resize takes 10-50x longer in debug builds.
+[profile.dev.package.image]
+opt-level = 3

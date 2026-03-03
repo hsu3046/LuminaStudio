@@ -1,0 +1,67 @@
+name: 'Release macOS DMG'
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            label: 'Apple Silicon'
+          - platform: 'macos-latest'
+            args: '--target x86_64-apple-darwin'
+            label: 'Intel'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Lumina Studio ${{ github.ref_name }}'
+          releaseBody: |
+            ## Lumina Studio ${{ github.ref_name }}
+
+            macOS 네이티브 이미지 뷰어 & AI 이미지 생성 도구
+
+            ### 설치 방법
+            1. `.dmg` 파일 다운로드
+            2. DMG를 열고 Lumina Studio를 Applications 폴더로 드래그
+            3. 처음 실행 시 Gatekeeper 경고가 나타나면:
+               - 시스템 설정 → 개인정보 보호 및 보안 → "확인 없이 열기" 클릭
+
+            > ⚠️ 이 앱은 코드 서명이 되어 있지 않습니다. Apple Developer 인증서 없이 빌드되었습니다.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
