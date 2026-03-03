@@ -38,3 +38,4 @@ src-tauri/gen/
 
 # Docs (internal)
 docs/
+.vercel
