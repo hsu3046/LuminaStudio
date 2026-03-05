@@ -1,9 +1,11 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
     Sparkles, Upload, X, Loader2, Download, Image as ImageIcon, AlertCircle,
+    Bookmark, BookmarkCheck, ChevronDown, Trash2, AlertTriangle,
 } from 'lucide-react';
 import { type Provider, type Quality } from '../services/settings';
-import { generateImage, estimateCost, ASPECT_RATIOS, getPreviewDimensions } from '../services/imageGen';
+import { generateImage, estimateCost, ASPECT_RATIOS, getPreviewDimensions, compressImageIfNeeded, humanizeError } from '../services/imageGen';
+import { isTauri } from '../utils/platform';
 
 const PROVIDERS: { id: Provider; label: string; desc: string }[] = [
     { id: 'gemini', label: 'Nano Banana', desc: 'Google Gemini' },
@@ -19,8 +21,48 @@ const QUALITY_PRESETS: { id: Quality; label: string }[] = [
 
 const MAX_REFERENCE_IMAGES = 5;
 const IMAGE_COUNT_OPTIONS = [1, 2, 3, 4] as const;
+const MAX_SAVED_PROMPTS = 10;
+const OPENAI_MAX_BYTES_PER_IMAGE = 4 * 1024 * 1024; // OpenAI images/edits 4MB limit
+
+/** Returns indices of images exceeding the byte limit */
+function getOversizedIndices(images: string[], limitBytes: number): number[] {
+    return images.reduce<number[]>((acc, img, i) => {
+        const base64 = img.split(',')[1] || '';
+        const bytes = Math.round(base64.length * 3 / 4);
+        if (bytes > limitBytes) acc.push(i);
+        return acc;
+    }, []);
+}
+
+/** Get estimated byte size of a base64 data URL */
+function getBase64Size(dataUrl: string): number {
+    const base64 = dataUrl.split(',')[1] || '';
+    return Math.round(base64.length * 3 / 4);
+}
+
+function formatMB(bytes: number): string {
+    return (bytes / 1024 / 1024).toFixed(1);
+}
+const SAVED_PROMPTS_KEY = 'lumina-studio-saved-prompts';
 
 type GenStatus = 'idle' | 'generating' | 'done' | 'error';
+
+// ===== Saved Prompts =====
+interface SavedPrompt {
+    id: string;
+    text: string;
+    savedAt: number;
+}
+
+function loadSavedPrompts(): SavedPrompt[] {
+    try {
+        return JSON.parse(localStorage.getItem(SAVED_PROMPTS_KEY) || '[]');
+    } catch { return []; }
+}
+
+function persistSavedPrompts(prompts: SavedPrompt[]) {
+    localStorage.setItem(SAVED_PROMPTS_KEY, JSON.stringify(prompts));
+}
 
 interface GenerateProps {
     initialRefs?: string[];
@@ -38,7 +80,28 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
     const [imageUrls, setImageUrls] = useState<string[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [duration, setDuration] = useState<number | null>(null);
+    const [isCompressing, setIsCompressing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Reference image preview lightbox
+    const [previewRef, setPreviewRef] = useState<number | null>(null);
+
+    // Saved prompts
+    const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>(() => loadSavedPrompts());
+    const [showPromptList, setShowPromptList] = useState(false);
+    const [justSaved, setJustSaved] = useState(false);
+    const promptListRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        const handleClick = (e: MouseEvent) => {
+            if (promptListRef.current && !promptListRef.current.contains(e.target as Node)) {
+                setShowPromptList(false);
+            }
+        };
+        if (showPromptList) document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [showPromptList]);
 
     // Receive references from Gallery selection mode
     const consumedRef = useRef(false);
@@ -61,16 +124,30 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
         };
     }, [provider, quality, aspectRatio, referenceImages.length, imageCount]);
 
+    // OpenAI 4MB per-image limit check
+    const oversizedIndices = useMemo(() => {
+        if (provider !== 'openai' || referenceImages.length === 0) return [];
+        return getOversizedIndices(referenceImages, OPENAI_MAX_BYTES_PER_IMAGE);
+    }, [provider, referenceImages]);
+
     const addImages = useCallback((files: FileList | File[]) => {
         const remaining = MAX_REFERENCE_IMAGES - referenceImages.length;
         const toAdd = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, remaining);
+        if (toAdd.length === 0) return;
+
+        setIsCompressing(true);
+        let processed = 0;
+
         toAdd.forEach(file => {
             const reader = new FileReader();
-            reader.onload = (ev) => {
+            reader.onload = async (ev) => {
                 const dataUrl = ev.target?.result as string;
                 if (dataUrl) {
-                    setReferenceImages(prev => prev.length < MAX_REFERENCE_IMAGES ? [...prev, dataUrl] : prev);
+                    const compressed = await compressImageIfNeeded(dataUrl);
+                    setReferenceImages(prev => prev.length < MAX_REFERENCE_IMAGES ? [...prev, compressed] : prev);
                 }
+                processed++;
+                if (processed >= toAdd.length) setIsCompressing(false);
             };
             reader.readAsDataURL(file);
         });
@@ -85,8 +162,52 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
         setReferenceImages(prev => prev.filter((_, i) => i !== index));
     }, []);
 
+    // ===== Prompt Save/Load =====
+    const saveCurrentPrompt = useCallback(() => {
+        const text = prompt.trim();
+        if (!text) return;
+        // Avoid duplicates
+        if (savedPrompts.some(p => p.text === text)) return;
+        const newPrompt: SavedPrompt = { id: Date.now().toString(), text, savedAt: Date.now() };
+        const updated = [newPrompt, ...savedPrompts].slice(0, MAX_SAVED_PROMPTS);
+        setSavedPrompts(updated);
+        persistSavedPrompts(updated);
+        // Visual feedback
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 1500);
+    }, [prompt, savedPrompts]);
+
+    const deletePrompt = useCallback((id: string) => {
+        const updated = savedPrompts.filter(p => p.id !== id);
+        setSavedPrompts(updated);
+        persistSavedPrompts(updated);
+    }, [savedPrompts]);
+
+    const loadPrompt = useCallback((text: string) => {
+        setPrompt(text);
+        setShowPromptList(false);
+    }, []);
+
     const handleGenerate = useCallback(async () => {
         if (!prompt.trim() || status === 'generating') return;
+
+        // OpenAI: warn about oversized reference images before spending API cost
+        if (provider === 'openai' && referenceImages.length > 0) {
+            const oversized = getOversizedIndices(referenceImages, OPENAI_MAX_BYTES_PER_IMAGE);
+            if (oversized.length > 0) {
+                const details = oversized.map(i => {
+                    const sizeMB = formatMB(getBase64Size(referenceImages[i]));
+                    return `  #${i + 1}: ${sizeMB}MB`;
+                }).join('\n');
+                const ok = window.confirm(
+                    `⚠ OpenAI는 참조 이미지당 4MB 제한이 있습니다.\n\n` +
+                    `다음 이미지가 초과합니다:\n${details}\n\n` +
+                    `자동 압축을 시도하지만 API 에러가 발생할 수 있습니다.\n계속하시겠습니까?`
+                );
+                if (!ok) return;
+            }
+        }
+
         setStatus('generating');
         setError(null);
         setImageUrls([]);
@@ -105,16 +226,49 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
             setDuration(result.duration);
             setStatus('done');
         } catch (err) {
-            setError(err instanceof Error ? err.message : '알 수 없는 오류');
+            setError(humanizeError(err, provider));
             setStatus('error');
         }
     }, [prompt, provider, aspectRatio, quality, imageCount, referenceImages, status]);
 
-    const handleDownload = useCallback((url: string, index: number) => {
+    const handleDownload = useCallback(async (url: string, index: number) => {
+        const filename = `lumina-${provider}-${Date.now()}-${index + 1}.png`;
+
+        if (isTauri()) {
+            try {
+                const { save } = await import('@tauri-apps/plugin-dialog');
+                const { writeFile } = await import('@tauri-apps/plugin-fs');
+
+                const savePath = await save({
+                    defaultPath: filename,
+                    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+                });
+                if (!savePath) return;
+
+                let bytes: Uint8Array;
+                if (url.startsWith('data:')) {
+                    const base64Data = url.split(',')[1];
+                    const raw = atob(base64Data);
+                    bytes = new Uint8Array(raw.length);
+                    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                } else {
+                    const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+                    const resp = await tauriFetch(url);
+                    bytes = new Uint8Array(await resp.arrayBuffer());
+                }
+
+                await writeFile(savePath, bytes);
+                console.log(`[Download] Saved to: ${savePath}`);
+            } catch (err) {
+                console.error('[Download] Tauri save error:', err);
+            }
+            return;
+        }
+
         try {
             const link = document.createElement('a');
             link.href = url;
-            link.download = `lumina-${provider}-${Date.now()}-${index + 1}.png`;
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -145,7 +299,46 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                     </div>
 
                     <div className="gen-section">
-                        <label className="gen-label">Prompt</label>
+                        <div className="gen-label-row">
+                            <label className="gen-label" style={{ marginBottom: 0 }}>Prompt</label>
+                            <div className="gen-prompt-actions">
+                                <button
+                                    className={`gen-prompt-action-btn ${justSaved ? 'saved' : ''}`}
+                                    onClick={saveCurrentPrompt}
+                                    disabled={!prompt.trim()}
+                                    title="프롬프트 저장"
+                                >
+                                    {justSaved ? <BookmarkCheck size={13} /> : <Bookmark size={13} />}
+                                </button>
+                                <div className="gen-prompt-dropdown-wrap" ref={promptListRef}>
+                                    <button
+                                        className={`gen-prompt-action-btn ${showPromptList ? 'active' : ''}`}
+                                        onClick={() => setShowPromptList(v => !v)}
+                                        disabled={savedPrompts.length === 0}
+                                        title={`저장된 프롬프트 (${savedPrompts.length}/${MAX_SAVED_PROMPTS})`}
+                                    >
+                                        <ChevronDown size={13} />
+                                        {savedPrompts.length > 0 && (
+                                            <span className="gen-prompt-badge">{savedPrompts.length}</span>
+                                        )}
+                                    </button>
+                                    {showPromptList && (
+                                        <div className="gen-prompt-dropdown">
+                                            {savedPrompts.map(sp => (
+                                                <div key={sp.id} className="gen-prompt-item">
+                                                    <button className="gen-prompt-item-text" onClick={() => loadPrompt(sp.text)}>
+                                                        {sp.text.length > 80 ? sp.text.slice(0, 80) + '...' : sp.text}
+                                                    </button>
+                                                    <button className="gen-prompt-item-del" onClick={(e) => { e.stopPropagation(); deletePrompt(sp.id); }}>
+                                                        <Trash2 size={12} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                         <textarea
                             className="gen-textarea"
                             value={prompt}
@@ -156,17 +349,39 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                     </div>
 
                     <div className="gen-section">
-                        <label className="gen-label">Reference Images ({referenceImages.length}/{MAX_REFERENCE_IMAGES})</label>
+                        <label className="gen-label">
+                            Reference Images ({referenceImages.length}/{MAX_REFERENCE_IMAGES})
+                            {isCompressing && <span style={{ marginLeft: 8, fontSize: '0.8em', opacity: 0.7 }}>압축 중...</span>}
+                        </label>
                         <div className="gen-drop-zone" onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
-                            <Upload size={18} strokeWidth={1.5} />
-                            <span>드래그하거나 클릭하여 업로드</span>
+                            {isCompressing ? <Loader2 size={18} strokeWidth={1.5} className="spin" /> : <Upload size={18} strokeWidth={1.5} />}
+                            <span>{isCompressing ? '이미지 최적화 중...' : '드래그하거나 클릭하여 업로드 (최대 10MB)'}</span>
                             <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { if (e.target.files) addImages(e.target.files); e.target.value = ''; }} />
                         </div>
+                        {/* OpenAI oversized warning banner */}
+                        {oversizedIndices.length > 0 && (
+                            <div className="gen-ref-warning">
+                                <AlertTriangle size={14} />
+                                <span>
+                                    OpenAI 4MB 제한 초과: 이미지
+                                    {oversizedIndices.map(i => ` #${i + 1} (${formatMB(getBase64Size(referenceImages[i]))}MB)`).join(',')}
+                                    — 생성 시 에러가 발생할 수 있습니다
+                                </span>
+                            </div>
+                        )}
                         {referenceImages.length > 0 && (
                             <div className="gen-ref-grid">
                                 {referenceImages.map((img, i) => (
-                                    <div key={i} className="gen-ref-thumb">
-                                        <img src={img} alt={`ref ${i + 1}`} />
+                                    <div key={i} className={`gen-ref-thumb ${oversizedIndices.includes(i) ? 'oversized' : ''}`}>
+                                        <img
+                                            src={img}
+                                            alt={`ref ${i + 1}`}
+                                            onClick={(e) => { e.stopPropagation(); setPreviewRef(i); }}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                        {oversizedIndices.includes(i) && (
+                                            <span className="gen-ref-size-badge">{formatMB(getBase64Size(img))}MB</span>
+                                        )}
                                         <button className="gen-ref-remove" onClick={() => removeImage(i)}><X size={12} /></button>
                                     </div>
                                 ))}
@@ -265,6 +480,30 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                     )}
                 </div>
             </div>
+
+            {/* ─── Reference Image Preview Lightbox ─── */}
+            {previewRef !== null && referenceImages[previewRef] && (
+                <div className="ref-preview-overlay" onClick={() => setPreviewRef(null)}>
+                    <button className="ref-preview-close" onClick={() => setPreviewRef(null)}>
+                        <X size={18} />
+                    </button>
+                    <img
+                        src={referenceImages[previewRef]}
+                        alt={`Reference preview ${previewRef + 1}`}
+                        className="ref-preview-image"
+                        onClick={e => e.stopPropagation()}
+                    />
+                    <div className="ref-preview-info" onClick={e => e.stopPropagation()}>
+                        {previewRef + 1} / {referenceImages.length}
+                    </div>
+                    {previewRef > 0 && (
+                        <button className="ref-preview-nav prev" onClick={e => { e.stopPropagation(); setPreviewRef(previewRef - 1); }}>‹</button>
+                    )}
+                    {previewRef < referenceImages.length - 1 && (
+                        <button className="ref-preview-nav next" onClick={e => { e.stopPropagation(); setPreviewRef(previewRef + 1); }}>›</button>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

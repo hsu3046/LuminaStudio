@@ -5,6 +5,80 @@
 import { getApiKey, type Provider, type Quality } from './settings';
 import { isTauri } from '../utils/platform';
 
+// ===== Reference Image Limits =====
+const REF_MAX_BYTES = 10 * 1024 * 1024; // 10MB per reference image
+const REF_MAX_DIMENSION = 4096;          // Max width/height for auto-resize
+
+/**
+ * Compress a base64 data URL image to fit within size/dimension limits.
+ * Returns the original if already within limits.
+ */
+export async function compressImageIfNeeded(dataUrl: string): Promise<string> {
+    // Estimate raw byte size from base64 length
+    const base64Part = dataUrl.split(',')[1] || '';
+    const estimatedBytes = Math.round(base64Part.length * 3 / 4);
+
+    if (estimatedBytes <= REF_MAX_BYTES) {
+        // Still check dimensions
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                if (img.width <= REF_MAX_DIMENSION && img.height <= REF_MAX_DIMENSION) {
+                    resolve(dataUrl); // Already within limits
+                    return;
+                }
+                resolve(resizeAndCompress(img));
+            };
+            img.onerror = () => resolve(dataUrl); // Fallback: return as-is
+            img.src = dataUrl;
+        });
+    }
+
+    // Needs compression
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(resizeAndCompress(img));
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+}
+
+function resizeAndCompress(img: HTMLImageElement): string {
+    let { width, height } = img;
+
+    // Scale down if exceeding max dimension
+    if (width > REF_MAX_DIMENSION || height > REF_MAX_DIMENSION) {
+        const scale = Math.min(REF_MAX_DIMENSION / width, REF_MAX_DIMENSION / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0, width, height);
+
+    // Try JPEG at decreasing quality until under 10MB
+    for (const q of [0.92, 0.85, 0.75, 0.6, 0.45]) {
+        const result = canvas.toDataURL('image/jpeg', q);
+        const size = Math.round((result.split(',')[1]?.length || 0) * 3 / 4);
+        if (size <= REF_MAX_BYTES) {
+            console.log(`[compressImage] ${img.naturalWidth}x${img.naturalHeight} → ${width}x${height}, quality=${q}, ~${(size / 1024 / 1024).toFixed(1)}MB`);
+            return result;
+        }
+    }
+
+    // Last resort: shrink further
+    const finalScale = 0.5;
+    canvas.width = Math.round(width * finalScale);
+    canvas.height = Math.round(height * finalScale);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const result = canvas.toDataURL('image/jpeg', 0.7);
+    console.log(`[compressImage] Final resize to ${canvas.width}x${canvas.height}`);
+    return result;
+}
+
 // Environment-aware fetch: Tauri HTTP plugin in desktop, native fetch in browser
 async function apiFetch(url: string, init: RequestInit): Promise<Response> {
     if (isTauri()) {
@@ -12,6 +86,69 @@ async function apiFetch(url: string, init: RequestInit): Promise<Response> {
         return tauriFetch(url, init as any);
     }
     return fetch(url, init);
+}
+
+// ===== User-Friendly Error Messages =====
+
+/**
+ * Convert raw API error into a user-friendly Korean message.
+ * Raw error is logged to console for debugging.
+ */
+function humanizeApiError(provider: string, status: number, rawBody: string): string {
+    const body = rawBody.toLowerCase();
+    console.error(`[${provider}] API Error (${status}):`, rawBody.slice(0, 500));
+
+    // --- Common patterns (all providers) ---
+    if (status === 401 || status === 403 || body.includes('invalid api key') || body.includes('unauthorized'))
+        return `${provider} API Key가 유효하지 않습니다. Settings에서 확인해주세요.`;
+
+    if (status === 429 || body.includes('rate limit') || body.includes('quota'))
+        return `${provider} API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.`;
+
+    if (status === 413 || body.includes('payload too large') || body.includes('request entity too large'))
+        return '요청 데이터가 너무 큽니다. 참조 이미지 수를 줄이거나 해상도를 낮춰주세요.';
+
+    // --- Content safety / moderation ---
+    if (body.includes('safety') || body.includes('blocked') || body.includes('content_policy') || body.includes('moderation') || body.includes('violat'))
+        return '콘텐츠 안전 정책에 의해 차단되었습니다. 프롬프트를 수정해주세요.';
+
+    // --- Image-specific ---
+    if (body.includes('image') && (body.includes('size') || body.includes('dimension') || body.includes('too large')))
+        return '참조 이미지가 API 크기 제한을 초과합니다. 이미지를 줄이거나 제거해주세요.';
+
+    if (body.includes('invalid_image') || body.includes('could not process image'))
+        return '참조 이미지를 처리할 수 없습니다. 다른 이미지를 사용해주세요.';
+
+    // --- Server errors ---
+    if (status >= 500)
+        return `${provider} 서버에 일시적 오류가 발생했습니다. 잠시 후 다시 시도해주세요.`;
+
+    if (status === 400) {
+        if (body.includes('prompt'))
+            return '프롬프트에 문제가 있습니다. 내용을 확인하고 수정해주세요.';
+        return `${provider} 요청이 거부되었습니다. 설정을 확인해주세요.`;
+    }
+
+    // --- Fallback ---
+    return `${provider} 오류가 발생했습니다 (${status}). 잠시 후 다시 시도해주세요.`;
+}
+
+/** Convert network/unknown errors to user-friendly messages */
+export function humanizeError(err: unknown, provider: string): string {
+    if (err instanceof Error) {
+        const msg = err.message;
+        // Already humanized (from our humanizeApiError)
+        if (!msg.includes('API') || !msg.includes('(')) return msg;
+        // Network errors
+        if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network'))
+            return '네트워크 연결에 실패했습니다. 인터넷 연결을 확인해주세요.';
+        if (msg.includes('timeout') || msg.includes('Timeout'))
+            return '요청 시간이 초과되었습니다. 네트워크 상태를 확인하고 다시 시도해주세요.';
+        if (msg.includes('CORS') || msg.includes('cors'))
+            return '보안 정책으로 인해 요청이 차단되었습니다. 데스크톱 앱을 사용해주세요.';
+        return msg;
+    }
+    return `${provider} 오류가 발생했습니다. 다시 시도해주세요.`;
 }
 
 // SeedDream endpoint: direct API in Tauri, proxy in browser (CORS bypass)
@@ -194,7 +331,7 @@ async function handleGemini(
 
         if (!response.ok) {
             const errBody = await response.text();
-            throw new Error(`Gemini API 오류 (${response.status}): ${errBody.slice(0, 200)}`);
+            throw new Error(humanizeApiError('Gemini', response.status, errBody));
         }
 
         const data = await response.json();
@@ -305,7 +442,7 @@ async function handleOpenAI(
 
     if (!response.ok) {
         const errBody = await response.text();
-        throw new Error(`OpenAI API 오류 (${response.status}): ${errBody.slice(0, 200)}`);
+        throw new Error(humanizeApiError('OpenAI', response.status, errBody));
     }
 
     const data = await response.json();
@@ -326,6 +463,7 @@ async function handleOpenAI(
 
 const SEEDREAM_MIN_PIXELS = 3_686_400;  // 1920²
 const SEEDREAM_MAX_PIXELS = 16_777_216; // 4096²
+const SEEDREAM_MAX_DIM = 4096;          // API hard cap per axis
 
 function mapSeedreamSize(aspectRatio?: string, quality?: Quality): string {
     let targetPixels: number;
@@ -338,27 +476,33 @@ function mapSeedreamSize(aspectRatio?: string, quality?: Quality): string {
     const [rw, rh] = (aspectRatio || '1:1').split(':').map(Number);
     if (!rw || !rh) return '1920x1920';
 
+    // Calculate ideal dimensions from target pixels
     let h = Math.sqrt(targetPixels * rh / rw);
     let w = h * rw / rh;
 
-    if (w * h < SEEDREAM_MIN_PIXELS) {
-        const scale = Math.sqrt(SEEDREAM_MIN_PIXELS / (w * h));
-        w *= scale;
-        h *= scale;
+    // Clamp each axis to API max dimension
+    if (w > SEEDREAM_MAX_DIM) {
+        w = SEEDREAM_MAX_DIM;
+        h = w * rh / rw;
+    }
+    if (h > SEEDREAM_MAX_DIM) {
+        h = SEEDREAM_MAX_DIM;
+        w = h * rw / rh;
     }
 
-    if (w * h > SEEDREAM_MAX_PIXELS) {
-        const scale = Math.sqrt(SEEDREAM_MAX_PIXELS / (w * h));
-        w *= scale;
-        h *= scale;
-    }
+    // Round to even — use floor to never exceed MAX_PIXELS
+    w = Math.floor(w / 2) * 2;
+    h = Math.floor(h / 2) * 2;
 
-    w = Math.ceil(w / 2) * 2;
-    h = Math.ceil(h / 2) * 2;
-
+    // Ensure minimum pixel count
     while (w * h < SEEDREAM_MIN_PIXELS) {
         w += 2;
         h += 2;
+    }
+
+    // Final safety: if rounding somehow pushed over, shrink
+    while (w * h > SEEDREAM_MAX_PIXELS) {
+        if (w >= h) w -= 2; else h -= 2;
     }
 
     return `${w}x${h}`;
@@ -372,14 +516,21 @@ async function handleSeedream(
     const hasRefs = referenceImages && referenceImages.length > 0;
 
     console.log(`[SeedDream] Size: ${size} (ratio: ${aspectRatio}, quality: ${quality}, n: ${n})`);
+
+    // Compress reference images if needed (10MB limit)
+    let processedRefs: string[] | undefined;
     if (hasRefs) {
-        console.log(`[SeedDream] Reference images: ${referenceImages.length}장`);
-        referenceImages.forEach((img, i) => {
-            const match = img.match(/^data:(image\/\w+);base64,/);
-            const type = match ? match[1] : 'unknown';
-            const sizeKB = Math.round((img.length * 3) / 4 / 1024);
-            console.log(`  [${i + 1}] ${type}, ~${sizeKB}KB`);
-        });
+        console.log(`[SeedDream] Reference images: ${referenceImages.length}장, compressing if needed...`);
+        processedRefs = await Promise.all(
+            referenceImages.map(async (img, i) => {
+                const compressed = await compressImageIfNeeded(img);
+                const match = compressed.match(/^data:(image\/\w+);base64,/);
+                const type = match ? match[1] : 'unknown';
+                const sizeKB = Math.round((compressed.length * 3) / 4 / 1024);
+                console.log(`  [${i + 1}] ${type}, ~${sizeKB}KB${compressed !== img ? ' (compressed)' : ''}`);
+                return compressed;
+            })
+        );
     } else {
         console.log('[SeedDream] No reference images');
     }
@@ -393,14 +544,14 @@ async function handleSeedream(
         prompt: finalPrompt,
         size,
         n,
-        response_format: 'url',
+        response_format: 'b64_json',
         watermark: false,
     };
 
-    if (hasRefs) {
+    if (processedRefs && processedRefs.length > 0) {
         // SeedDream API requires parameter name "image" (not "image_urls")
         // Ensure mime type in data URI is lowercase (API requirement)
-        const normalizedRefs = referenceImages.map(img =>
+        const normalizedRefs = processedRefs.map(img =>
             img.replace(/^data:image\/(\w+);/, (_, fmt) => `data:image/${fmt.toLowerCase()};`)
         );
         // Single image: string, multiple: string[]
@@ -422,10 +573,8 @@ async function handleSeedream(
 
         if (!response.ok) {
             const errBody = await response.text();
-            console.error('[SeedDream] API Error (full):', errBody);
-            console.error('[SeedDream] Status:', response.status, response.statusText);
             console.error('[SeedDream] Request size:', size, '| Model: seedream-4-5-251128');
-            throw new Error(`SeedDream API 오류 (${response.status}): ${errBody.slice(0, 500)}`);
+            throw new Error(humanizeApiError('SeedDream', response.status, errBody));
         }
 
         const data = await response.json();

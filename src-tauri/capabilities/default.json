@@ -10,10 +10,32 @@
     "opener:default",
     "dialog:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "fs:default",
     "fs:allow-read",
+    "fs:allow-write",
     "fs:allow-exists",
     "fs:allow-stat",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "$DESKTOP/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$PICTURE/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        }
+      ]
+    },
     "http:default",
     {
       "identifier": "http:default",
