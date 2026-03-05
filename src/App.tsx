@@ -606,8 +606,12 @@ export default function App() {
         )
         }
 
-        {page === 'generate' && <Generate initialRefs={pendingRefs} onRefsConsumed={() => setPendingRefs([])} />}
-        {page === 'settings' && <SettingsPage />}
+        <div style={{ display: page === 'generate' ? 'flex' : 'none', flex: 1, overflow: 'hidden' }}>
+          <Generate initialRefs={pendingRefs} onRefsConsumed={() => setPendingRefs([])} />
+        </div>
+        <div style={{ display: page === 'settings' ? 'flex' : 'none', flex: 1, overflow: 'hidden' }}>
+          <SettingsPage />
+        </div>
       </div >
 
       {/* Lightbox */}

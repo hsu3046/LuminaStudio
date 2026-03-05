@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import type { Provider, Quality } from '../services/settings';
 import {
     Sparkles, Upload, X, Loader2, Download, Image as ImageIcon, AlertCircle,
     Bookmark, BookmarkCheck, ChevronDown, Trash2, AlertTriangle,
 } from 'lucide-react';
-import { type Provider, type Quality } from '../services/settings';
+// Provider/Quality types imported above
 import { generateImage, estimateCost, ASPECT_RATIOS, getPreviewDimensions, compressImageIfNeeded, humanizeError } from '../services/imageGen';
 import { isTauri } from '../utils/platform';
 
@@ -47,6 +48,33 @@ const SAVED_PROMPTS_KEY = 'lumina-studio-saved-prompts';
 
 type GenStatus = 'idle' | 'generating' | 'done' | 'error';
 
+// ===== Estimated Generation Time =====
+
+function estimateTime(provider: Provider, quality: Quality, n: number, refCount: number): { min: number; max: number } {
+    const base: Record<Provider, Record<Quality, [number, number]>> = {
+        gemini: { standard: [5, 10], '2k': [8, 15], '4k': [10, 20] },
+        openai: { standard: [10, 20], '2k': [15, 30], '4k': [15, 30] },
+        seedream: { standard: [8, 15], '2k': [10, 20], '4k': [15, 25] },
+    };
+    const [bMin, bMax] = base[provider][quality];
+    const refAdd = refCount > 0 ? (provider === 'openai' ? 5 : 3) : 0;
+    // Gemini runs in parallel, others scale linearly
+    const multi = provider === 'gemini' ? Math.max(1, n * 0.6) : n;
+    return {
+        min: Math.round((bMin + refAdd) * multi),
+        max: Math.round((bMax + refAdd) * multi),
+    };
+}
+
+function getStageMessage(elapsed: number, estMax: number): string {
+    const ratio = elapsed / estMax;
+    if (ratio < 0.15) return '프롬프트 분석 중...';
+    if (ratio < 0.4) return '이미지 렌더링 중...';
+    if (ratio < 0.7) return '디테일 생성 중...';
+    if (ratio < 0.95) return '거의 완료...';
+    return '마무리 중... 조금만 더 기다려주세요';
+}
+
 // ===== Saved Prompts =====
 interface SavedPrompt {
     id: string;
@@ -82,6 +110,26 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
     const [duration, setDuration] = useState<number | null>(null);
     const [isCompressing, setIsCompressing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Generating progress timer
+    const [elapsed, setElapsed] = useState(0);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const timeEstimate = useMemo(() =>
+        estimateTime(provider, quality, imageCount, referenceImages.length),
+        [provider, quality, imageCount, referenceImages.length]
+    );
+
+    // Start/stop elapsed timer on status change
+    useEffect(() => {
+        if (status === 'generating') {
+            setElapsed(0);
+            timerRef.current = setInterval(() => setElapsed(prev => prev + 1), 1000);
+        } else {
+            if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        }
+        return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    }, [status]);
 
     // Reference image preview lightbox
     const [previewRef, setPreviewRef] = useState<number | null>(null);
@@ -237,7 +285,7 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
         if (isTauri()) {
             try {
                 const { save } = await import('@tauri-apps/plugin-dialog');
-                const { writeFile } = await import('@tauri-apps/plugin-fs');
+                const { create } = await import('@tauri-apps/plugin-fs');
 
                 const savePath = await save({
                     defaultPath: filename,
@@ -257,10 +305,14 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                     bytes = new Uint8Array(await resp.arrayBuffer());
                 }
 
-                await writeFile(savePath, bytes);
-                console.log(`[Download] Saved to: ${savePath}`);
+                // Use low-level create/write/close for reliable saving
+                const file = await create(savePath);
+                await file.write(bytes);
+                await file.close();
+                console.log(`[Download] Saved ${bytes.length} bytes to: ${savePath}`);
             } catch (err) {
                 console.error('[Download] Tauri save error:', err);
+                alert(`저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`);
             }
             return;
         }
@@ -435,8 +487,13 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                             <span className="gen-cost-detail">{costEstimate.detail}</span>
                         </div>
                         <button className="gen-generate-btn" onClick={handleGenerate} disabled={!prompt.trim() || status === 'generating'}>
-                            {status === 'generating' ? (<><Loader2 size={16} className="spin" /> 생성 중...</>) : (<><Sparkles size={16} /> 이미지 생성</>)}
+                            {status === 'generating' ? (<><Loader2 size={16} className="spin" /> 생성 중... ({elapsed}초)</>) : (<><Sparkles size={16} /> 이미지 생성</>)}
                         </button>
+                        {status !== 'generating' && (
+                            <div className="gen-time-estimate">
+                                예상 소요: ~{timeEstimate.min}–{timeEstimate.max}초
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -449,9 +506,30 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                         </div>
                     )}
                     {status === 'generating' && (
-                        <div className="gen-empty">
-                            <Loader2 size={40} className="spin" />
-                            <p>이미지 생성 중...</p>
+                        <div className="gen-progress">
+                            <div className="gen-progress-header">
+                                <Loader2 size={28} className="spin" />
+                                <div className="gen-progress-info">
+                                    <p className="gen-progress-stage">{getStageMessage(elapsed, timeEstimate.max)}</p>
+                                    <p className="gen-progress-time">
+                                        {elapsed}초 경과 · 예상 {timeEstimate.min}–{timeEstimate.max}초
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="gen-progress-bar-track">
+                                <div
+                                    className="gen-progress-bar-fill"
+                                    style={{ width: `${Math.min(95, (elapsed / timeEstimate.max) * 100)}%` }}
+                                />
+                            </div>
+                            {/* Shimmer placeholders */}
+                            <div className={`gen-shimmer-grid count-${imageCount}`}>
+                                {Array.from({ length: imageCount }).map((_, i) => (
+                                    <div key={i} className="gen-shimmer-item">
+                                        <div className="shimmer" />
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                     {status === 'error' && error && (

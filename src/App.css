@@ -1098,6 +1098,8 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .gen-generate-btn:hover {
@@ -1152,6 +1154,101 @@ body {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-bottom: 12px;
+}
+
+/* Generate time estimate hint */
+.gen-time-estimate {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+/* ─── Generating Progress UI ─── */
+.gen-progress {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 20px;
+}
+
+.gen-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--accent);
+}
+
+.gen-progress-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gen-progress-stage {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.gen-progress-time {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.gen-progress-bar-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.gen-progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 1s ease;
+}
+
+/* Shimmer placeholder grid during generation */
+.gen-shimmer-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  flex: 1;
+}
+
+.gen-shimmer-grid.count-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.gen-shimmer-grid.count-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.gen-shimmer-grid.count-4 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.gen-shimmer-item {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  aspect-ratio: 1;
+}
+
+.gen-shimmer-item .shimmer {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
 }
 
 .gen-result-grid {
