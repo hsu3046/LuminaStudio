@@ -1,10 +1,9 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import type { Provider, Quality } from '../services/settings';
+import { loadSettings, type Provider, type Quality } from '../services/settings';
 import {
     Sparkles, Upload, X, Loader2, Download, Image as ImageIcon, AlertCircle,
-    Bookmark, BookmarkCheck, ChevronDown, Trash2, AlertTriangle,
+    Bookmark, BookmarkCheck, ChevronDown, Trash2, AlertTriangle, CheckCircle2, AlertOctagon,
 } from 'lucide-react';
-// Provider/Quality types imported above
 import { generateImage, estimateCost, ASPECT_RATIOS, getPreviewDimensions, compressImageIfNeeded, humanizeError } from '../services/imageGen';
 import { isTauri } from '../utils/platform';
 
@@ -110,6 +109,9 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
     const [duration, setDuration] = useState<number | null>(null);
     const [isCompressing, setIsCompressing] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Auto-save state
+    const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
     // Generating progress timer
     const [elapsed, setElapsed] = useState(0);
@@ -236,8 +238,73 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
         setShowPromptList(false);
     }, []);
 
+    // ===== Auto-Save =====
+    const autoSaveImages = useCallback(async (urls: string[], prov: Provider) => {
+        if (!isTauri()) return;
+        const settings = loadSettings();
+        if (!settings.autoSave || !settings.outputFolder) return;
+
+        setAutoSaveStatus('saving');
+
+        try {
+            const { mkdir, create } = await import('@tauri-apps/plugin-fs');
+            const { exists } = await import('@tauri-apps/plugin-fs');
+
+            // 폴더가 없으면 생성
+            const folderExists = await exists(settings.outputFolder);
+            if (!folderExists) {
+                await mkdir(settings.outputFolder, { recursive: true });
+            }
+
+            const now = new Date();
+            const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+
+            for (let i = 0; i < urls.length; i++) {
+                const url = urls[i];
+                const filename = `lumina-${prov}-${ts}-${i + 1}.png`;
+                const filePath = `${settings.outputFolder}/${filename}`;
+
+                let bytes: Uint8Array;
+                if (url.startsWith('data:')) {
+                    const base64Data = url.split(',')[1];
+                    const raw = atob(base64Data);
+                    bytes = new Uint8Array(raw.length);
+                    for (let j = 0; j < raw.length; j++) bytes[j] = raw.charCodeAt(j);
+                } else {
+                    const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+                    const resp = await tauriFetch(url);
+                    bytes = new Uint8Array(await resp.arrayBuffer());
+                }
+
+                const file = await create(filePath);
+                await file.write(bytes);
+                await file.close();
+                console.log(`[AutoSave] Saved ${filename} (${bytes.length} bytes)`);
+            }
+
+            setAutoSaveStatus('saved');
+            // 5초 후 상태 초기화
+            setTimeout(() => setAutoSaveStatus('idle'), 5000);
+        } catch (err) {
+            console.error('[AutoSave] Error:', err);
+            setAutoSaveStatus('error');
+        }
+    }, []);
+
     const handleGenerate = useCallback(async () => {
         if (!prompt.trim() || status === 'generating') return;
+
+        // 미저장 확인 (자동 저장 OFF이고 이전 결과가 있을 때)
+        if (imageUrls.length > 0) {
+            const settings = loadSettings();
+            const isAutoSaved = settings.autoSave && settings.outputFolder && autoSaveStatus === 'saved';
+            if (!isAutoSaved) {
+                const ok = window.confirm(
+                    '저장하지 않은 이미지가 있습니다.\n새로 생성하면 현재 이미지가 사라집니다.\n\n계속하시겠습니까?'
+                );
+                if (!ok) return;
+            }
+        }
 
         // OpenAI: warn about oversized reference images before spending API cost
         if (provider === 'openai' && referenceImages.length > 0) {
@@ -260,6 +327,7 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
         setError(null);
         setImageUrls([]);
         setDuration(null);
+        setAutoSaveStatus('idle');
 
         try {
             const result = await generateImage({
@@ -273,11 +341,14 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
             setImageUrls(result.imageUrls);
             setDuration(result.duration);
             setStatus('done');
+
+            // 자동 저장 실행 (비동기, 에러가 나도 생성 결과는 유지)
+            autoSaveImages(result.imageUrls, provider);
         } catch (err) {
             setError(humanizeError(err, provider));
             setStatus('error');
         }
-    }, [prompt, provider, aspectRatio, quality, imageCount, referenceImages, status]);
+    }, [prompt, provider, aspectRatio, quality, imageCount, referenceImages, status, imageUrls.length, autoSaveStatus, autoSaveImages]);
 
     const handleDownload = useCallback(async (url: string, index: number) => {
         const filename = `lumina-${provider}-${Date.now()}-${index + 1}.png`;
@@ -312,7 +383,8 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                 console.log(`[Download] Saved ${bytes.length} bytes to: ${savePath}`);
             } catch (err) {
                 console.error('[Download] Tauri save error:', err);
-                alert(`저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`);
+                const errMsg = err instanceof Error ? err.message : String(err);
+                alert(`저장 실패: ${errMsg}`);
             }
             return;
         }
@@ -542,7 +614,24 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                     {imageUrls.length > 0 && (
                         <>
                             {duration !== null && (
-                                <div className="gen-duration">⏱ {(duration / 1000).toFixed(1)}초</div>
+                                <div className="gen-duration-row">
+                                    <div className="gen-duration">⏱ {(duration / 1000).toFixed(1)}초</div>
+                                    {autoSaveStatus === 'saving' && (
+                                        <div className="gen-autosave-badge saving">
+                                            <Loader2 size={12} className="spin" /> 자동 저장 중...
+                                        </div>
+                                    )}
+                                    {autoSaveStatus === 'saved' && (
+                                        <div className="gen-autosave-badge saved">
+                                            <CheckCircle2 size={12} /> 자동 저장됨
+                                        </div>
+                                    )}
+                                    {autoSaveStatus === 'error' && (
+                                        <div className="gen-autosave-badge error">
+                                            <AlertOctagon size={12} /> 자동 저장 실패
+                                        </div>
+                                    )}
+                                </div>
                             )}
                             <div className={`gen-result-grid count-${imageUrls.length}`}>
                                 {imageUrls.map((url, i) => (

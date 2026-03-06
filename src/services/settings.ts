@@ -11,6 +11,7 @@ export interface AppSettings {
     defaultQuality: Quality;
     defaultAspectRatio: string;
     outputFolder: string;
+    autoSave: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -19,6 +20,7 @@ const DEFAULTS: AppSettings = {
     defaultQuality: 'standard',
     defaultAspectRatio: '3:2',
     outputFolder: '',
+    autoSave: true,
 };
 
 export function loadSettings(): AppSettings {
