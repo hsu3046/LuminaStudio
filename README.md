@@ -6,11 +6,11 @@ Pick photos from your own library as creative references, generate new images wi
 
 ## Tagline-ko
 
-내 컴퓨터에 쌓아둔 사진을 레퍼런스로 골라, Gemini · OpenAI · SeedDream으로 새 이미지를 생성하고, 바로 내 폴더에 저장까지. 모든 흐름이 하나의 앱에서 완결됩니다.
+내 컴퓨터에 쌓아둔 사진을 레퍼런스로 골라, Gemini · OpenAI · SeedDream으로 새 이미지를 생성하고, 바로 내 폴더에 저장까지. AI 이미지 생성부터 관리까지의 모든 워크플로우가 하나의 앱에서 완결됩니다.
 
 ## Tagline-ja
 
-手持ちの写真をリファレンスに選んで、Gemini・OpenAI・SeedDreamで新しい画像を生成。そのまま自分のフォルダに自動保存まで — すべての流れが、ひとつのアプリで完結します。
+手持ちの写真をリファレンスに選んで、Gemini・OpenAI・SeedDreamで新しい画像を生成。そのまま自分のフォルダに自動保存まで — AI画像生成부터管理まで、すべての流れが、ひとつのアプリで完結します。
 
 ---
 
