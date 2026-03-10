@@ -1,89 +1,67 @@
-# Lumina Studio
+# 🖼️ Lumina Studio
 
-<p align="center">
-  <strong>Native macOS Image Viewer & AI Image Generation Studio</strong><br>
-  Built with Tauri v2 + React 19
-</p>
+## Tagline-en
+
+Pick photos from your own library as creative references, generate new images with Gemini, OpenAI, or SeedDream, and save everything straight to your machine — one app, one seamless flow.
+
+## Tagline-ko
+
+내 컴퓨터에 쌓아둔 사진을 레퍼런스로 골라, Gemini · OpenAI · SeedDream으로 새 이미지를 생성하고, 바로 내 폴더에 저장까지. 모든 흐름이 하나의 앱에서 완결됩니다.
+
+## Tagline-ja
+
+手持ちの写真をリファレンスに選んで、Gemini・OpenAI・SeedDreamで新しい画像を生成。そのまま自分のフォルダに自動保存まで — すべての流れが、ひとつのアプリで完結します。
 
 ---
 
 ## Summary-en
 
-Lumina Studio is a free macOS app that lets you browse your photo library and create new images with AI — all in one place. Pick any photos from your folders, use them as inspiration, and generate stunning new images with a single click. Supports Google Gemini, OpenAI, and SeedDream (API key required for AI generation).
+What if the photos already on your computer could become the starting point for AI-generated images?
+Lumina Studio lets you browse your local photo library, pick your favorite shots as creative references, and generate new images — all without switching apps.
+Choose from three AI providers: Gemini, OpenAI, or SeedDream. Generated images are automatically saved to a folder you set.
+Browse, generate, and save — one app, one uninterrupted flow.
 
 ## Summary-ko
 
-Lumina Studio는 macOS용 무료 앱으로, 내 컴퓨터의 사진을 갤러리로 감상하고 AI로 새로운 이미지를 만들 수 있습니다. 마음에 드는 사진을 골라 영감의 소스로 활용하면, 클릭 한 번으로 멋진 이미지가 생성됩니다. Google Gemini, OpenAI, SeedDream을 지원합니다 (AI 이미지 생성에는 각 서비스의 API 키 발급이 필요합니다).
+폴더에 쌓아둔 사진들, AI 이미지 생성에 바로 활용할 수 있다면 어떨까요?
+Lumina Studio는 내 컴퓨터의 사진을 빠르게 탐색하고, 마음에 드는 이미지를 레퍼런스로 골라 AI 이미지를 바로 생성합니다.
+Gemini, OpenAI, SeedDream — 3가지 AI 모델 중 원하는 걸 골라 쓸 수 있고, 생성된 이미지는 지정한 폴더에 자동으로 저장됩니다.
+브라우저 탭을 오가거나 따로 앱을 열 필요 없이, 탐색부터 생성, 저장까지 하나의 흐름으로 완결됩니다.
 
 ## Summary-ja
 
-Lumina Studioは、macOS用の無料アプリです。パソコン内の写真をギャラリーとして閲覧し、AIで新しい画像を作成できます。お気に入りの写真をインスピレーションとして選び、ワンクリックで素敵な画像を生成。Google Gemini、OpenAI、SeedDreamに対応しています（AI画像生成には各サービスのAPIキーの取得が必要です）。
+手持ちの写真を、AI画像生成のスタート地点に。
+Lumina Studioなら、ローカルの写真ライブラリをすばやく見渡して、気に入ったショットをリファレンスに選ぶだけ。
+Gemini・OpenAI・SeedDreamの3つのAIモデルから好きなものを選んで、そのまま新しい画像を生成できます。
+生成した画像は指定フォルダに自動保存。ブラウズから生成、保存まで、すべてひとつのアプリで完結します。
 
 ---
 
-## ✨ Features
+## ✨ What It Does
 
-### 📁 Gallery — Local Image Browser
-
-- **Directory navigation** with breadcrumb path display and parent folder traversal
-- **Smart file filtering** — automatically shows only images, videos, and folders (hides system/config files)
-- **Cached thumbnails** — Lanczos3-quality JPEG thumbnails with on-disk MD5-hashed cache (`~/Library/Caches/lumina-studio/thumbnails/`)
-- **Lazy loading** with IntersectionObserver and a 3-concurrent-request semaphore for smooth performance
-- **Pagination** — loads 30 items at a time with a "Load More" button for predictable scrolling
-- **Selection mode** — multi-select up to 5 images with visual checkmarks, then send them as AI generation references
-- **Quick Access** sidebar — one-click navigation to Home and Pictures directories
-
-### 🖼️ Lightbox — Fullscreen Image Viewer
-
-- Full-resolution image display with dark overlay
-- Keyboard navigation (← → arrow keys)
-- Filename display overlay
-
-### 🎨 AI Image Generation
-
-Generate images using three AI providers, all via Tauri's native HTTP plugin (bypasses CORS — no proxy server needed):
-
-| Provider | Model | Reference Support | Response Format |
-|----------|-------|-------------------|-----------------|
-| **Google Gemini** | gemini-3.1-flash-image-preview | ✅ via `inlineData` parts | base64 inline |
-| **OpenAI** | gpt-image-1 | ✅ via multipart `image[]` | b64_json / url |
-| **ByteDance SeedDream** | seedream-4-5-251128 | ✅ via `image` param | url |
-
-**Generation options:**
-- **8 aspect ratios** — 1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, 21:9
-- **3 quality levels** — Standard, 2K, 4K
-- **Batch generation** — 1–4 images per request
-- **Real-time cost estimation** per provider/quality/size
-- **Reference images** — use gallery photos as generation references (max 5)
-
-### 🔗 Gallery → Generate Workflow
-
-A seamless workflow connecting browsing and creation:
-
-1. Enter **Selection Mode** in Gallery (checkbox button)
-2. Select up to 5 reference images
-3. Click "Use as Reference" → automatically switches to Generate page
-4. Reference images are pre-loaded and ready for AI generation
-
-### ⚙️ Settings
-
-- Per-provider API key management
-- Default provider, quality, and aspect ratio configuration
-- All settings stored in `localStorage` — **never transmitted externally**
+- **Browse your local photos at native speed** — Lanczos3-quality cached thumbnails load instantly, with lazy loading and smart file filtering that hides system clutter.
+- **Select references and generate in one flow** — Pick up to 5 photos from your gallery and send them straight to AI generation as creative references.
+- **Generate images with 3 AI providers** — Google Gemini, OpenAI (gpt-image-1), and ByteDance SeedDream, all through Tauri's native HTTP engine — no CORS hacks, no proxy servers.
+- **Choose your canvas** — 8 aspect ratios, 3 quality levels (up to 4K), and batch generation of 1–4 images per request.
+- **See costs before you click** — Real-time cost estimation per provider, quality, and size so there are no billing surprises.
+- **Auto-save generated images** — Configure a save folder in Settings and never lose a creation again.
+- **Keep your keys safe** — API keys live only in localStorage, sent directly to providers via the native Rust HTTP layer — never stored or routed through any third-party server.
+- **View images in a fullscreen lightbox** — Full-resolution display with keyboard navigation and filename overlay.
 
 ---
 
 ## 🛠 Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Frontend** | React 19, TypeScript, Vite 7 | UI & state management |
-| **Backend** | Rust, Tauri v2 | Native OS integration, image processing |
-| **Image Processing** | `image` crate (Lanczos3) | Thumbnail generation |
-| **HTTP** | `tauri-plugin-http` | CORS-free API requests at Rust level |
-| **File System** | `tauri-plugin-fs`, `walkdir` | Directory scanning & file access |
-| **Styling** | Vanilla CSS (Dark Theme) | Custom dark UI |
-| **Icons** | Lucide React | UI iconography |
+| Layer | Technology |
+|-------|------------|
+| Framework | React 19 + Vite 7 |
+| Language | TypeScript (Strict) |
+| Native Backend | Rust + Tauri v2 |
+| Image Processing | `image` crate (Lanczos3) |
+| HTTP | `tauri-plugin-http` (CORS-free) |
+| File System | `tauri-plugin-fs` + `walkdir` |
+| Styling | Vanilla CSS (Dark Theme) |
+| Icons | Lucide React |
 
 ---
 
@@ -101,8 +79,8 @@ Go to the [Releases](../../releases) page and download the latest `.dmg` file.
 ```bash
 # Prerequisites: Node.js 18+, Rust 1.77+
 
-git clone https://github.com/user/lumina-studio.git
-cd lumina-studio
+git clone https://github.com/hsu3046/LuminaStudio.git
+cd LuminaStudio
 npm install
 
 # Development
@@ -128,6 +106,26 @@ Configure your AI provider API keys in the Settings page:
 
 ---
 
+## 📁 Project Structure
+
+```
+├── src/                    # React frontend
+│   ├── App.tsx             # Main application shell & routing
+│   ├── App.css             # Global styles (dark theme)
+│   ├── pages/              # Page components (Gallery, Generate)
+│   ├── services/           # API clients & settings logic
+│   └── utils/              # Shared utilities
+├── src-tauri/              # Rust backend (Tauri v2)
+│   ├── src/                # Rust commands (scan, thumbnails, base64)
+│   └── Cargo.toml          # Rust dependencies
+├── api/                    # Serverless proxy (Vercel)
+├── public/                 # Static assets
+├── docs/                   # Project documentation
+└── package.json            # Node dependencies & scripts
+```
+
+---
+
 ## 🏗 Architecture
 
 ```
@@ -144,8 +142,32 @@ Frontend (React 19)          Backend (Rust / Tauri v2)       External APIs
 
 ---
 
-## 📄 License
+## � Roadmap
 
-This project is licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file for details.
+- [ ] Windows & Linux support
+- [ ] Image editing & annotation tools
+- [ ] Prompt history & favorites
+- [ ] Batch processing from folder selection
+- [ ] Plugin system for additional AI providers
 
-Copyright (c) 2026 KnowAI
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat(scope): add amazing feature'`)
+4. Push to the branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## �📄 License
+
+This project is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html).
+
+---
+
+*Built by [KnowAI](https://knowai.space) · © 2026 KnowAI*
