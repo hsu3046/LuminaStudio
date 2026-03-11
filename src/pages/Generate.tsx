@@ -3,6 +3,7 @@ import { loadSettings, type Provider, type Quality } from '../services/settings'
 import {
     Sparkles, Upload, X, Loader2, Download, Image as ImageIcon, AlertCircle,
     Bookmark, BookmarkCheck, ChevronDown, Trash2, AlertTriangle, CheckCircle2, AlertOctagon,
+    ShieldAlert,
 } from 'lucide-react';
 import { generateImage, estimateCost, ASPECT_RATIOS, getPreviewDimensions, compressImageIfNeeded, humanizeError } from '../services/imageGen';
 import { isTauri } from '../utils/platform';
@@ -46,6 +47,13 @@ function formatMB(bytes: number): string {
 const SAVED_PROMPTS_KEY = 'lumina-studio-saved-prompts';
 
 type GenStatus = 'idle' | 'generating' | 'done' | 'error';
+
+// Confirm modal state
+interface ConfirmModal {
+    show: boolean;
+    title: string;
+    message: string;
+}
 
 // ===== Estimated Generation Time =====
 
@@ -112,6 +120,9 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
 
     // Auto-save state
     const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+    // Confirm modal state
+    const [confirmModal, setConfirmModal] = useState<ConfirmModal>({ show: false, title: '', message: '' });
 
     // Generating progress timer
     const [elapsed, setElapsed] = useState(0);
@@ -291,38 +302,9 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
         }
     }, []);
 
-    const handleGenerate = useCallback(async () => {
-        if (!prompt.trim() || status === 'generating') return;
-
-        // 미저장 확인 (자동 저장 OFF이고 이전 결과가 있을 때)
-        if (imageUrls.length > 0) {
-            const settings = loadSettings();
-            const isAutoSaved = settings.autoSave && settings.outputFolder && autoSaveStatus === 'saved';
-            if (!isAutoSaved) {
-                const ok = window.confirm(
-                    '저장하지 않은 이미지가 있습니다.\n새로 생성하면 현재 이미지가 사라집니다.\n\n계속하시겠습니까?'
-                );
-                if (!ok) return;
-            }
-        }
-
-        // OpenAI: warn about oversized reference images before spending API cost
-        if (provider === 'openai' && referenceImages.length > 0) {
-            const oversized = getOversizedIndices(referenceImages, OPENAI_MAX_BYTES_PER_IMAGE);
-            if (oversized.length > 0) {
-                const details = oversized.map(i => {
-                    const sizeMB = formatMB(getBase64Size(referenceImages[i]));
-                    return `  #${i + 1}: ${sizeMB}MB`;
-                }).join('\n');
-                const ok = window.confirm(
-                    `⚠ OpenAI는 참조 이미지당 4MB 제한이 있습니다.\n\n` +
-                    `다음 이미지가 초과합니다:\n${details}\n\n` +
-                    `자동 압축을 시도하지만 API 에러가 발생할 수 있습니다.\n계속하시겠습니까?`
-                );
-                if (!ok) return;
-            }
-        }
-
+    // 실제 이미지 생성 실행 (경고 확인 후 호출)
+    const executeGenerate = useCallback(async () => {
+        setConfirmModal({ show: false, title: '', message: '' });
         setStatus('generating');
         setError(null);
         setImageUrls([]);
@@ -348,7 +330,45 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
             setError(humanizeError(err, provider));
             setStatus('error');
         }
-    }, [prompt, provider, aspectRatio, quality, imageCount, referenceImages, status, imageUrls.length, autoSaveStatus, autoSaveImages]);
+    }, [prompt, provider, aspectRatio, quality, imageCount, referenceImages, autoSaveImages]);
+
+    const handleGenerate = useCallback(() => {
+        if (!prompt.trim() || status === 'generating') return;
+
+        // 미저장 확인 (자동 저장 OFF이고 이전 결과가 있을 때)
+        if (imageUrls.length > 0) {
+            const settings = loadSettings();
+            const isAutoSaved = settings.autoSave && settings.outputFolder && autoSaveStatus === 'saved';
+            if (!isAutoSaved) {
+                setConfirmModal({
+                    show: true,
+                    title: '이미지 덮어쓰기',
+                    message: '저장하지 않은 이미지가 있습니다.\n새로 생성하면 현재 이미지가 사라집니다.',
+                });
+                return;
+            }
+        }
+
+        // OpenAI: warn about oversized reference images before spending API cost
+        if (provider === 'openai' && referenceImages.length > 0) {
+            const oversized = getOversizedIndices(referenceImages, OPENAI_MAX_BYTES_PER_IMAGE);
+            if (oversized.length > 0) {
+                const details = oversized.map(i => {
+                    const sizeMB = formatMB(getBase64Size(referenceImages[i]));
+                    return `#${i + 1}: ${sizeMB}MB`;
+                }).join(', ');
+                setConfirmModal({
+                    show: true,
+                    title: 'OpenAI 이미지 크기 초과',
+                    message: `OpenAI는 참조 이미지당 4MB 제한이 있습니다.\n초과 이미지: ${details}\n\n자동 압축을 시도하지만 API 에러가 발생할 수 있습니다.`,
+                });
+                return;
+            }
+        }
+
+        // 경고 조건 없음 → 바로 생성
+        executeGenerate();
+    }, [prompt, provider, referenceImages, status, imageUrls.length, autoSaveStatus, executeGenerate]);
 
     const handleDownload = useCallback(async (url: string, index: number) => {
         const filename = `lumina-${provider}-${Date.now()}-${index + 1}.png`;
@@ -647,6 +667,33 @@ export default function Generate({ initialRefs, onRefsConsumed }: GenerateProps)
                     )}
                 </div>
             </div>
+
+            {/* ─── Confirm Modal ─── */}
+            {confirmModal.show && (
+                <div className="gen-confirm-overlay" onClick={() => setConfirmModal({ show: false, title: '', message: '' })}>
+                    <div className="gen-confirm-dialog" onClick={e => e.stopPropagation()}>
+                        <div className="gen-confirm-icon">
+                            <ShieldAlert size={24} />
+                        </div>
+                        <h3 className="gen-confirm-title">{confirmModal.title}</h3>
+                        <p className="gen-confirm-message">{confirmModal.message}</p>
+                        <div className="gen-confirm-actions">
+                            <button
+                                className="gen-confirm-cancel"
+                                onClick={() => setConfirmModal({ show: false, title: '', message: '' })}
+                            >
+                                취소
+                            </button>
+                            <button
+                                className="gen-confirm-ok"
+                                onClick={executeGenerate}
+                            >
+                                계속 생성
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ─── Reference Image Preview Lightbox ─── */}
             {previewRef !== null && referenceImages[previewRef] && (

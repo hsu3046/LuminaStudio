@@ -1490,6 +1490,100 @@ body {
   color: #ef4444;
 }
 
+/* ─── Confirm Modal ─── */
+.gen-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+.gen-confirm-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-lg, 16px);
+  padding: 28px 32px 24px;
+  max-width: 380px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.2s ease;
+}
+
+.gen-confirm-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(234, 179, 8, 0.12);
+  color: #eab308;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gen-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.gen-confirm-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.gen-confirm-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.gen-confirm-cancel,
+.gen-confirm-ok {
+  flex: 1;
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.gen-confirm-cancel {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.gen-confirm-cancel:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.gen-confirm-ok {
+  border: none;
+  background: var(--accent);
+  color: #000;
+}
+
+.gen-confirm-ok:hover {
+  background: var(--accent-hover);
+}
+
 /* ─── Reference Image Preview Lightbox ─── */
 .ref-preview-overlay {
   position: fixed;
